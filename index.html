@@ -33,6 +33,10 @@
             <p class="text-xs text-slate-400 uppercase tracking-widest font-bold">Score</p>
             <p id="score-display" class="text-3xl font-black text-amber-400">0</p>
         </div>
+        <div class="text-center">
+            <p class="text-xs text-slate-400 uppercase tracking-widest font-bold">Mode</p>
+            <p id="mode-display" class="text-sm md:text-lg font-black text-emerald-400">NORMAL</p>
+        </div>
         <div class="text-right">
             <p class="text-xs text-slate-400 uppercase tracking-widest font-bold mb-1">Vies</p>
             <div id="lives-display" class="text-2xl flex gap-1 justify-end">
@@ -71,6 +75,18 @@
         <div id="stats-box" class="hidden bg-slate-800 p-4 rounded-xl border border-slate-700 mb-8 w-full max-w-xs mx-auto">
             <p class="text-slate-400 text-sm uppercase">Score Final</p>
             <p id="final-score" class="text-4xl font-black text-white">12</p>
+            <p id="level-advice" class="hidden mt-3 text-sm font-bold text-emerald-400"></p>
+        </div>
+
+        <div class="w-full max-w-sm mb-6">
+            <p class="text-xs text-slate-400 uppercase tracking-widest font-bold mb-3">Mode de jeu</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button data-mode="training" class="mode-option border-2 rounded-xl p-3 font-black uppercase text-sm">Entraînement</button>
+                <button data-mode="beginner" class="mode-option border-2 rounded-xl p-3 font-black uppercase text-sm">Débutant</button>
+                <button data-mode="normal" class="mode-option border-2 rounded-xl p-3 font-black uppercase text-sm">Normal</button>
+                <button data-mode="expert" class="mode-option border-2 rounded-xl p-3 font-black uppercase text-sm">FNL (insane)</button>
+            </div>
+            <p id="mode-help" class="text-sm text-slate-300 mt-3 min-h-[2.5rem]"></p>
         </div>
 
         <button id="btn-start" class="bg-emerald-500 text-slate-900 font-black text-3xl px-12 py-6 rounded-2xl shadow-[0_6px_0_rgb(5,150,105)] hover:translate-y-1 hover:shadow-[0_2px_0_rgb(5,150,105)] active:translate-y-2 active:shadow-none transition-all">▶ JOUER</button>
@@ -95,6 +111,8 @@
 
         // --- ETAT DU JEU ---
         let score = 0;
+        let correctAnswers = 0;
+        let minTimerCorrectAnswers = 0;
         let lives = 3;
         let isPlaying = false;
         let currentTimer = 0;
@@ -105,7 +123,115 @@
         const timerBar = document.getElementById('timer-bar');
         const flashOverlay = document.getElementById('flash-overlay');
 
-        // --- BIBLIOTHEQUE DES 6 MICRO-JEUX ---
+        const GAME_MODES = {
+            training: {
+                label: "ENTRAÎNEMENT",
+                help: "Sans timer. Les erreurs ne retirent pas de vie.",
+                maxTime: null,
+                lives: 3,
+                timer: false,
+                loseLife: false,
+                speedEvery: 0,
+                speedFactor: 1,
+                minTime: null,
+                games: ["PotOdds", "SPR", "FlushDraw", "FlopTexture", "StackToBB", "SizingCheck", "TopPair", "PairedBoard", "Overcard", "SuitedHand", "OutsCount"]
+            },
+            beginner: {
+                label: "DÉBUTANT",
+                help: "Plus de temps, questions simples pour prendre les réflexes.",
+                maxTime: 7000,
+                lives: 3,
+                timer: true,
+                loseLife: true,
+                speedEvery: 8,
+                speedFactor: 0.90,
+                minTime: 1000,
+                games: ["FlushDraw", "FlopTexture", "StackToBB", "SizingCheck", "TopPair", "PairedBoard", "SuitedHand"]
+            },
+            normal: {
+                label: "NORMAL",
+                help: "Timing initial du jeu : 4 secondes.",
+                maxTime: 4000,
+                lives: 3,
+                timer: true,
+                loseLife: true,
+                speedEvery: 5,
+                speedFactor: 0.85,
+                minTime: 1000,
+                games: ["PotOdds", "SPR", "FlushDraw", "FlopTexture", "StackToBB", "SizingCheck", "TopPair", "PairedBoard", "Overcard", "SuitedHand", "OutsCount"]
+            },
+            expert: {
+                label: "FNL (insane)",
+                help: "Très rapide, brutal, avec tous les mini-jeux.",
+                maxTime: 2500,
+                lives: 3,
+                timer: true,
+                loseLife: true,
+                speedEvery: 4,
+                speedFactor: 0.80,
+                minTime: 1000,
+                games: ["PotOdds", "SPR", "FlushDraw", "FlopTexture", "StackToBB", "SizingCheck", "TopPair", "PairedBoard", "Overcard", "SuitedHand", "OutsCount"]
+            }
+        };
+
+        let selectedMode = "normal";
+        let currentMode = GAME_MODES[selectedMode];
+
+        const CARD_SUITS = ['spade', 'heart', 'diamond', 'club'];
+        const CARD_SYMBOLS = {'spade': '♠', 'heart': '♥', 'diamond': '♦', 'club': '♣'};
+        const CARD_RANKS = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+        const CARD_VALUES = {'A':14, 'K':13, 'Q':12, 'J':11, 'T':10, '9':9, '8':8, '7':7, '6':6, '5':5, '4':4, '3':3, '2':2};
+
+        function randomItem(items) {
+            return items[Math.floor(Math.random() * items.length)];
+        }
+
+        function createDeck() {
+            const deck = [];
+            for (const rank of CARD_RANKS) {
+                for (const suit of CARD_SUITS) {
+                    deck.push({ rank, suit, val: CARD_VALUES[rank] });
+                }
+            }
+            return deck;
+        }
+
+        function shuffle(cards) {
+            const copy = [...cards];
+            for (let i = copy.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+            }
+            return copy;
+        }
+
+        function pickAndRemove(deck, predicate = () => true) {
+            const indexes = [];
+            deck.forEach((card, index) => {
+                if (predicate(card)) indexes.push(index);
+            });
+            const pickedIndex = indexes.length ? randomItem(indexes) : Math.floor(Math.random() * deck.length);
+            return deck.splice(pickedIndex, 1)[0];
+        }
+
+        function cardHtml(card) {
+            return `<div class="card w-16 h-24 text-3xl ${card.suit} border-2 border-slate-200">${card.rank}${CARD_SYMBOLS[card.suit]}</div>`;
+        }
+
+        function cardGroupHtml(title, cards) {
+            return `
+                <div class="w-full bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
+                    <p class="text-xs text-slate-400 uppercase font-bold tracking-widest text-center mb-3">${title}</p>
+                    <div class="flex gap-3 justify-center">${cards.map(cardHtml).join('')}</div>
+                </div>
+            `;
+        }
+
+        function rankFromValue(value) {
+            return Object.keys(CARD_VALUES).find(rank => CARD_VALUES[rank] === value);
+        }
+
+        // --- BIBLIOTHEQUE DES MICRO-JEUX ---
         const microGames = [
             {
                 name: "PotOdds",
@@ -129,7 +255,8 @@
                             </div>
                         </div>
                     `;
-                    return { html: html, btnLeft: "FOLD", btnRight: "CALL", correctAnswer: isWinning ? "btn-right" : "btn-left" };
+                    const explanation = `Cote nécessaire : ${bet} / (${pot} + ${bet} + ${bet}) = ${(oddsNeeded * 100).toFixed(0)} %. Ton équité est de ${(heroEquity * 100).toFixed(0)} %. Il faut CALL seulement si ton équité est supérieure à la cote nécessaire.`;
+                    return { html: html, btnLeft: "FOLD", btnRight: "CALL", correctAnswer: isWinning ? "btn-right" : "btn-left", explanation: explanation };
                 }
             },
             {
@@ -153,35 +280,34 @@
                             </div>
                         </div>
                     `;
-                    return { html: html, btnLeft: "LOW (<3)", btnRight: "HIGH (>6)", correctAnswer: isLow ? "btn-left" : "btn-right" };
+                    const explanation = `SPR = Stack / Pot = ${stack} / ${pot} = ${(stack / pot).toFixed(1)}. Ici, c’est ${isLow ? "un SPR bas : moins de 3" : "un SPR haut : plus de 6"}.`;
+                    return { html: html, btnLeft: "LOW (<3)", btnRight: "HIGH (>6)", correctAnswer: isLow ? "btn-left" : "btn-right", explanation: explanation };
                 }
             },
             {
                 name: "FlushDraw",
                 instruction: "TIRAGE COULEUR ?",
                 setup: function() {
-                    const suits = ['spade', 'heart', 'diamond', 'club'];
-                    const symbols = {'spade': '♠', 'heart': '♥', 'diamond': '♦', 'club': '♣'};
-                    const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
-                    
                     const hasDraw = Math.random() > 0.5;
-                    let suit1 = suits[Math.floor(Math.random() * suits.length)];
-                    let suit2 = hasDraw ? suit1 : suits[(suits.indexOf(suit1) + 1) % 4];
-                    let suit3 = suits[(suits.indexOf(suit1) + 2) % 4];
-                    
-                    let board = [
-                        { rank: ranks[Math.floor(Math.random() * ranks.length)], suit: suit1 },
-                        { rank: ranks[Math.floor(Math.random() * ranks.length)], suit: suit2 },
-                        { rank: ranks[Math.floor(Math.random() * ranks.length)], suit: suit3 }
-                    ];
-                    board.sort(() => Math.random() - 0.5);
+                    let board;
+                    const deck = createDeck();
 
-                    const html = `
-                        <div class="flex gap-3 justify-center w-full bg-slate-800/50 p-6 rounded-2xl border border-slate-700">
-                            ${board.map(c => `<div class="card w-16 h-24 text-3xl ${c.suit} border-2 border-slate-200">${c.rank}${symbols[c.suit]}</div>`).join('')}
-                        </div>
-                    `;
-                    return { html: html, btnLeft: "NON", btnRight: "OUI", correctAnswer: hasDraw ? "btn-right" : "btn-left" };
+                    if (hasDraw) {
+                        const targetSuit = randomItem(CARD_SUITS);
+                        const first = pickAndRemove(deck, c => c.suit === targetSuit);
+                        const second = pickAndRemove(deck, c => c.suit === targetSuit);
+                        const third = pickAndRemove(deck, c => c.suit !== targetSuit);
+                        board = shuffle([first, second, third]);
+                    } else {
+                        const threeSuits = shuffle(CARD_SUITS).slice(0, 3);
+                        board = shuffle(threeSuits.map(suit => pickAndRemove(deck, c => c.suit === suit)));
+                    }
+
+                    const html = cardGroupHtml("Flop", board);
+                    const explanation = hasDraw
+                        ? "Deux cartes du flop sont de la même couleur : un joueur peut donc avoir un tirage couleur avec deux cartes de cette couleur en main."
+                        : "Les trois cartes du flop sont de couleurs différentes : pas de tirage couleur immédiat au flop.";
+                    return { html: html, btnLeft: "NON", btnRight: "OUI", correctAnswer: hasDraw ? "btn-right" : "btn-left", explanation: explanation };
                 }
             },
             {
@@ -210,7 +336,10 @@
                             ${flop.map(c => `<div class="card w-16 h-24 text-3xl ${c.suit} border-2 border-slate-200">${c.rank}${symbols[c.suit]}</div>`).join('')}
                         </div>
                     `;
-                    return { html: html, btnLeft: "DRY", btnRight: "WET", correctAnswer: isWet ? "btn-right" : "btn-left" };
+                    const explanation = isWet
+                        ? `Board WET : ${hasFD ? "il y a un tirage couleur possible" : ""}${hasFD && isConn ? " et " : ""}${isConn ? "les cartes sont connectées" : ""}.`
+                        : "Board DRY : pas de tirage couleur évident et cartes peu connectées.";
+                    return { html: html, btnLeft: "DRY", btnRight: "WET", correctAnswer: isWet ? "btn-right" : "btn-left", explanation: explanation };
                 }
             },
             {
@@ -232,7 +361,8 @@
                             </div>
                         </div>
                     `;
-                    return { html: html, btnLeft: "< 20 BB", btnRight: "> 20 BB", correctAnswer: isLow ? "btn-left" : "btn-right" };
+                    const explanation = `Nombre de BB = tapis / grosse blinde = ${stack.toLocaleString()} / ${bb} = ${(stack / bb).toFixed(1)} BB. La bonne réponse est donc ${isLow ? "< 20 BB" : "> 20 BB"}.`;
+                    return { html: html, btnLeft: "< 20 BB", btnRight: "> 20 BB", correctAnswer: isLow ? "btn-left" : "btn-right", explanation: explanation };
                 }
             },
             {
@@ -256,7 +386,191 @@
                             </div>
                         </div>
                     `;
-                    return { html: html, btnLeft: "1/3 POT", btnRight: "1/2 POT", correctAnswer: isOneThird ? "btn-left" : "btn-right" };
+                    const explanation = `La mise est de ${bet} pour un pot de ${pot}. ${pot} / 3 = ${(pot / 3).toFixed(0)} et ${pot} / 2 = ${(pot / 2).toFixed(0)}. C’est donc ${isOneThird ? "1/3 pot" : "1/2 pot"}.`;
+                    return { html: html, btnLeft: "1/3 POT", btnRight: "1/2 POT", correctAnswer: isOneThird ? "btn-left" : "btn-right", explanation: explanation };
+                }
+            },
+            {
+                name: "TopPair",
+                instruction: "TOP PAIR ?",
+                setup: function() {
+                    const hasTopPair = Math.random() > 0.5;
+                    const deck = createDeck();
+                    let hero;
+                    let flop;
+
+                    if (hasTopPair) {
+                        const topValue = Math.floor(Math.random() * 7) + 8;
+                        const topRank = rankFromValue(topValue);
+                        const lowerRanks = CARD_RANKS.filter(rank => CARD_VALUES[rank] < topValue);
+
+                        flop = [
+                            pickAndRemove(deck, c => c.rank === topRank),
+                            pickAndRemove(deck, c => lowerRanks.includes(c.rank)),
+                            pickAndRemove(deck, c => lowerRanks.includes(c.rank))
+                        ];
+                        hero = [
+                            pickAndRemove(deck, c => c.rank === topRank),
+                            pickAndRemove(deck, c => c.rank !== topRank)
+                        ];
+                    } else {
+                        flop = [pickAndRemove(deck), pickAndRemove(deck), pickAndRemove(deck)];
+                        const boardHigh = Math.max(...flop.map(c => c.val));
+                        hero = [
+                            pickAndRemove(deck, c => c.val !== boardHigh),
+                            pickAndRemove(deck, c => c.val !== boardHigh)
+                        ];
+                    }
+
+                    flop = shuffle(flop);
+                    hero = shuffle(hero);
+                    const html = `<div class="space-y-4 w-full">${cardGroupHtml("Ta main", hero)}${cardGroupHtml("Flop", flop)}</div>`;
+                    const boardHigh = Math.max(...flop.map(c => c.val));
+                    const explanation = hasTopPair
+                        ? "Tu as une carte qui fait paire avec la plus haute carte du flop. C’est top pair."
+                        : `La plus haute carte du flop vaut ${rankFromValue(boardHigh)}. Aucune de tes cartes ne fait paire avec cette carte haute.`;
+                    return { html: html, btnLeft: "NON", btnRight: "OUI", correctAnswer: hasTopPair ? "btn-right" : "btn-left", explanation: explanation };
+                }
+            },
+            {
+                name: "PairedBoard",
+                instruction: "BOARD PAIRÉ ?",
+                setup: function() {
+                    const isPaired = Math.random() > 0.5;
+                    const deck = createDeck();
+                    let flop;
+
+                    if (isPaired) {
+                        const pairRank = randomItem(CARD_RANKS);
+                        flop = [
+                            pickAndRemove(deck, c => c.rank === pairRank),
+                            pickAndRemove(deck, c => c.rank === pairRank),
+                            pickAndRemove(deck, c => c.rank !== pairRank)
+                        ];
+                    } else {
+                        const ranks = shuffle(CARD_RANKS).slice(0, 3);
+                        flop = ranks.map(rank => pickAndRemove(deck, c => c.rank === rank));
+                    }
+
+                    flop = shuffle(flop);
+                    const html = cardGroupHtml("Flop", flop);
+                    const explanation = isPaired
+                        ? "Deux cartes du flop ont la même valeur : le board est pairé."
+                        : "Les trois cartes du flop ont des valeurs différentes : le board n’est pas pairé.";
+                    return { html: html, btnLeft: "NON", btnRight: "OUI", correctAnswer: isPaired ? "btn-right" : "btn-left", explanation: explanation };
+                }
+            },
+            {
+                name: "Overcard",
+                instruction: "OVERCARD ?",
+                setup: function() {
+                    const hasOvercard = Math.random() > 0.5;
+                    const deck = createDeck();
+                    let flop;
+                    let hero;
+                    const boardHighValue = hasOvercard
+                        ? Math.floor(Math.random() * 6) + 7
+                        : Math.floor(Math.random() * 6) + 9;
+                    const boardHighRank = rankFromValue(boardHighValue);
+                    const lowerOrEqualRanks = CARD_RANKS.filter(rank => CARD_VALUES[rank] <= boardHighValue);
+                    const lowerRanks = CARD_RANKS.filter(rank => CARD_VALUES[rank] < boardHighValue);
+                    const higherRanks = CARD_RANKS.filter(rank => CARD_VALUES[rank] > boardHighValue);
+
+                    flop = [
+                        pickAndRemove(deck, c => c.rank === boardHighRank),
+                        pickAndRemove(deck, c => lowerRanks.includes(c.rank)),
+                        pickAndRemove(deck, c => lowerRanks.includes(c.rank))
+                    ];
+
+                    if (hasOvercard) {
+                        hero = [
+                            pickAndRemove(deck, c => higherRanks.includes(c.rank)),
+                            pickAndRemove(deck, c => c.rank !== boardHighRank)
+                        ];
+                    } else {
+                        hero = [
+                            pickAndRemove(deck, c => lowerOrEqualRanks.includes(c.rank)),
+                            pickAndRemove(deck, c => lowerOrEqualRanks.includes(c.rank))
+                        ];
+                    }
+
+                    flop = shuffle(flop);
+                    hero = shuffle(hero);
+                    const html = `<div class="space-y-4 w-full">${cardGroupHtml("Ta main", hero)}${cardGroupHtml("Flop", flop)}</div>`;
+                    const explanation = hasOvercard
+                        ? `Au moins une de tes cartes est plus haute que la plus haute carte du flop (${boardHighRank}). Tu as donc une overcard.`
+                        : `Aucune de tes cartes n’est plus haute que la plus haute carte du flop (${boardHighRank}).`;
+                    return { html: html, btnLeft: "NON", btnRight: "OUI", correctAnswer: hasOvercard ? "btn-right" : "btn-left", explanation: explanation };
+                }
+            },
+            {
+                name: "SuitedHand",
+                instruction: "SUITED OU OFFSUIT ?",
+                setup: function() {
+                    const isSuited = Math.random() > 0.5;
+                    const deck = createDeck();
+                    let hero;
+
+                    if (isSuited) {
+                        const suit = randomItem(CARD_SUITS);
+                        hero = [
+                            pickAndRemove(deck, c => c.suit === suit),
+                            pickAndRemove(deck, c => c.suit === suit)
+                        ];
+                    } else {
+                        const suits = shuffle(CARD_SUITS).slice(0, 2);
+                        hero = [
+                            pickAndRemove(deck, c => c.suit === suits[0]),
+                            pickAndRemove(deck, c => c.suit === suits[1])
+                        ];
+                    }
+
+                    const html = cardGroupHtml("Ta main", hero);
+                    const explanation = isSuited
+                        ? "Tes deux cartes sont de la même couleur : la main est suited."
+                        : "Tes deux cartes sont de couleurs différentes : la main est offsuit.";
+                    return { html: html, btnLeft: "OFFSUIT", btnRight: "SUITED", correctAnswer: isSuited ? "btn-right" : "btn-left", explanation: explanation };
+                }
+            },
+            {
+                name: "OutsCount",
+                instruction: "COMBIEN D'OUTS ?",
+                setup: function() {
+                    const isFlushDraw = Math.random() > 0.5;
+                    const deck = createDeck();
+                    let hero;
+                    let flop;
+                    let explanation;
+
+                    if (isFlushDraw) {
+                        const suit = randomItem(CARD_SUITS);
+                        hero = [
+                            pickAndRemove(deck, c => c.suit === suit),
+                            pickAndRemove(deck, c => c.suit === suit)
+                        ];
+                        flop = [
+                            pickAndRemove(deck, c => c.suit === suit),
+                            pickAndRemove(deck, c => c.suit === suit),
+                            pickAndRemove(deck, c => c.suit !== suit)
+                        ];
+                        explanation = "Tirage couleur : 13 cartes dans une couleur, 4 déjà visibles entre ta main et le flop. Il reste donc 9 outs.";
+                    } else {
+                        hero = [
+                            pickAndRemove(deck, c => c.rank === "6" && c.suit === "club"),
+                            pickAndRemove(deck, c => c.rank === "7" && c.suit === "diamond")
+                        ];
+                        flop = [
+                            pickAndRemove(deck, c => c.rank === "9" && c.suit === "spade"),
+                            pickAndRemove(deck, c => c.rank === "T" && c.suit === "heart"),
+                            pickAndRemove(deck, c => c.rank === "A" && c.suit === "club")
+                        ];
+                        explanation = "Tirage quinte ventral : seule une carte de rang 8 complète la quinte 6-7-8-9-T. Il y a 4 huit dans le paquet, donc 4 outs.";
+                    }
+
+                    hero = shuffle(hero);
+                    flop = shuffle(flop);
+                    const html = `<div class="space-y-4 w-full">${cardGroupHtml("Ta main", hero)}${cardGroupHtml("Flop", flop)}</div>`;
+                    return { html: html, btnLeft: "4 OUTS", btnRight: "9 OUTS", correctAnswer: isFlushDraw ? "btn-right" : "btn-left", explanation: explanation };
                 }
             }
         ];
@@ -264,10 +578,43 @@
         // --- MOTEUR DE JEU ---
 
         function updateUI() {
-            document.getElementById('score-display').textContent = score;
+            document.getElementById('score-display').textContent = Math.round(score);
+            document.getElementById('mode-display').textContent = currentMode.label;
+
+            if (!currentMode.loseLife) {
+                document.getElementById('lives-display').innerHTML = "∞";
+                return;
+            }
+
             let livesHtml = "";
             for(let i=0; i<3; i++) livesHtml += i < lives ? "❤️" : "🖤";
             document.getElementById('lives-display').innerHTML = livesHtml;
+        }
+
+        function updateModeButtons() {
+            document.querySelectorAll('.mode-option').forEach(button => {
+                const isSelected = button.dataset.mode === selectedMode;
+                button.className = isSelected
+                    ? "mode-option border-2 border-emerald-400 bg-emerald-500/20 text-white rounded-xl p-3 font-black uppercase text-sm"
+                    : "mode-option border-2 border-slate-600 bg-slate-800 text-slate-300 rounded-xl p-3 font-black uppercase text-sm";
+            });
+
+            const help = document.getElementById('mode-help');
+            if (help) help.textContent = GAME_MODES[selectedMode].help;
+        }
+
+        function calculateWinPoints() {
+            if (!currentMode.timer || !maxTime) return 10;
+
+            const remainingRatio = Math.max(0, Math.min(1, currentTimer / maxTime));
+            const basePoints = 10 + remainingRatio * 90;
+
+            // Plus le timer est court, plus la même seconde restante vaut cher.
+            // Exemple : 1s restante sur 2s rapporte beaucoup plus que 1s restante sur 7s.
+            const referenceTime = GAME_MODES.normal.maxTime;
+            const difficultyMultiplier = Math.max(0.6, Math.min(2.5, referenceTime / maxTime));
+
+            return Math.round(basePoints * difficultyMultiplier);
         }
 
         function flashScreen(type) {
@@ -275,25 +622,52 @@
             setTimeout(() => { flashOverlay.className = "absolute inset-0 z-0 pointer-events-none"; }, 300);
         }
 
+        function getCorrectAnswerLabel() {
+            if (!currentGame) return "";
+            return currentGame.correctAnswer === "btn-left" ? currentGame.btnLeft : currentGame.btnRight;
+        }
+
+        function showErrorExplanation() {
+            const nextLabel = lives <= 0 ? "VOIR LE SCORE" : "QUESTION SUIVANTE";
+            document.getElementById('game-content').innerHTML = `
+                <div class="w-full bg-slate-800 border-2 border-red-500 rounded-2xl p-5 text-center shadow-lg">
+                    <p class="text-xs text-slate-400 uppercase font-bold tracking-widest mb-2">Bonne réponse</p>
+                    <p class="text-3xl font-black text-emerald-400 mb-4">${getCorrectAnswerLabel()}</p>
+                    <p class="text-base text-slate-100 leading-relaxed mb-5">${currentGame?.explanation || "Reprends le calcul calmement avant de passer à la suite."}</p>
+                    <button id="btn-next-after-error" class="w-full bg-emerald-500 text-slate-900 font-black text-xl px-6 py-4 rounded-xl shadow-[0_5px_0_rgb(5,150,105)] active:translate-y-1 active:shadow-none transition-all">${nextLabel}</button>
+                </div>
+            `;
+
+            document.getElementById('btn-next-after-error').addEventListener('click', () => {
+                if (lives <= 0) endGame();
+                else nextMiniGame();
+            });
+        }
+
         function showResultAndNext(isWin) {
             isPlaying = false;
             clearInterval(timerInterval);
             
             if (isWin) {
-                score++;
+                const points = calculateWinPoints();
+                score += points;
+                correctAnswers++;
+                if (currentMode.timer && Math.round(maxTime) <= 1000) {
+                    minTimerCorrectAnswers++;
+                }
                 playSound('win');
                 flashScreen('win');
-                document.getElementById('instruction-text').textContent = "BIEN !";
+                document.getElementById('instruction-text').textContent = `BIEN ! +${points} PTS`;
                 document.getElementById('instruction-text').className = "text-5xl font-black text-emerald-400 uppercase tracking-widest text-center mb-6 drop-shadow-[0_0_15px_rgba(16,185,129,0.8)]";
                 
-                if (score > 0 && score % 5 === 0) {
-                    maxTime = Math.max(1500, maxTime * 0.85);
+                if (currentMode.timer && currentMode.speedEvery > 0 && correctAnswers > 0 && correctAnswers % currentMode.speedEvery === 0) {
+                    maxTime = Math.max(currentMode.minTime, maxTime * currentMode.speedFactor);
                     playSound('speedup');
                     document.getElementById('instruction-text').textContent = "PLUS VITE !";
                     document.getElementById('instruction-text').className = "text-5xl font-black text-yellow-400 uppercase tracking-widest text-center mb-6 drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]";
                 }
             } else {
-                lives--;
+                if (currentMode.loseLife) lives--;
                 playSound('lose');
                 flashScreen('lose');
                 document.body.classList.add('shake');
@@ -304,11 +678,12 @@
 
             updateUI();
 
-            if (lives <= 0) {
-                setTimeout(endGame, 1000);
-            } else {
-                setTimeout(nextMiniGame, 1000);
+            if (!isWin) {
+                showErrorExplanation();
+                return;
             }
+
+            setTimeout(nextMiniGame, 1000);
         }
 
         function handleInput(btnId) {
@@ -318,7 +693,8 @@
         }
 
         function nextMiniGame() {
-            const gameDef = microGames[Math.floor(Math.random() * microGames.length)];
+            const availableGames = microGames.filter(game => currentMode.games.includes(game.name));
+            const gameDef = availableGames[Math.floor(Math.random() * availableGames.length)];
             currentGame = gameDef.setup();
 
             document.getElementById('instruction-text').className = "text-3xl md:text-5xl font-black text-white uppercase tracking-widest text-center mb-6 drop-shadow-lg";
@@ -328,11 +704,18 @@
             document.getElementById('btn-left').textContent = currentGame.btnLeft;
             document.getElementById('btn-right').textContent = currentGame.btnRight;
 
-            currentTimer = maxTime;
             isPlaying = true;
-            timerBar.className = "h-full bg-emerald-500 w-full shadow-[0_0_10px_rgba(16,185,129,0.8)]";
-            
             clearInterval(timerInterval);
+
+            if (!currentMode.timer) {
+                timerBar.style.width = "100%";
+                timerBar.className = "h-full bg-sky-500 w-full shadow-[0_0_10px_rgba(14,165,233,0.8)]";
+                return;
+            }
+
+            currentTimer = maxTime;
+            timerBar.style.width = "100%";
+            timerBar.className = "h-full bg-emerald-500 w-full shadow-[0_0_10px_rgba(16,185,129,0.8)]";
             let lastTime = performance.now();
             
             timerInterval = setInterval(() => {
@@ -355,10 +738,14 @@
         function startGame() {
             Tone.start();
             initAudio();
+            currentMode = GAME_MODES[selectedMode];
             document.getElementById('menu-overlay').classList.add('hidden');
+            document.getElementById('stats-box').classList.add('hidden');
             score = 0;
-            lives = 3;
-            maxTime = 4000;
+            correctAnswers = 0;
+            minTimerCorrectAnswers = 0;
+            lives = currentMode.lives;
+            maxTime = currentMode.maxTime || 4000;
             updateUI();
             nextMiniGame();
         }
@@ -369,11 +756,31 @@
             document.getElementById('menu-title').className = "text-5xl md:text-7xl font-black mb-2 text-red-500 uppercase tracking-widest drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]";
             document.getElementById('menu-subtitle').textContent = "Ton cerveau a fondu.";
             document.getElementById('stats-box').classList.remove('hidden');
-            document.getElementById('final-score').textContent = score;
+            document.getElementById('final-score').textContent = Math.round(score);
+            const levelAdvice = document.getElementById('level-advice');
+            if (minTimerCorrectAnswers > 2) {
+                levelAdvice.textContent = "Tu as tenu plus de 2 bonnes réponses avec le timer à 1 seconde : il faut passer au niveau au-dessus.";
+                levelAdvice.classList.remove('hidden');
+            } else {
+                levelAdvice.textContent = "";
+                levelAdvice.classList.add('hidden');
+            }
             document.getElementById('btn-start').textContent = "REJOUER";
         }
 
         document.getElementById('btn-start').addEventListener('click', startGame);
+
+        document.querySelectorAll('.mode-option').forEach(button => {
+            button.addEventListener('click', () => {
+                selectedMode = button.dataset.mode;
+                currentMode = GAME_MODES[selectedMode];
+                updateModeButtons();
+                updateUI();
+            });
+        });
+
+        updateModeButtons();
+        updateUI();
         
         ['btn-left', 'btn-right'].forEach(id => {
             const btn = document.getElementById(id);

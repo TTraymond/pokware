@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PokerWare - Micro-Training</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: white; overflow: hidden; touch-action: manipulation; }
+        .shake { animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both; }
+        @keyframes shake { 10%, 90% { transform: translate3d(-2px, 0, 0); } 20%, 80% { transform: translate3d(4px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-8px, 0, 0); } 40%, 60% { transform: translate3d(8px, 0, 0); } }
+        .flash-green { animation: flashG 0.3s; }
+        @keyframes flashG { 0% { background-color: #22c55e; } 100% { background-color: transparent; } }
+        .flash-red { animation: flashR 0.3s; }
+        @keyframes flashR { 0% { background-color: #ef4444; } 100% { background-color: transparent; } }
+        
+        .card { background: white; color: black; border-radius: 0.5rem; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .spade, .club { color: #1e293b; }
+        .heart, .diamond { color: #dc2626; }
+        
+        #timer-bar { transition: width 0.1s linear; }
+    </style>
+</head>
+<body class="h-[100dvh] w-screen flex flex-col justify-between relative" style="padding-bottom: max(1.5rem, env(safe-area-inset-bottom));">
+
+    <!-- OVERLAYS D'ANIMATION (Flashs visuels) -->
+    <div id="flash-overlay" class="absolute inset-0 z-0 pointer-events-none"></div>
+
+    <!-- HEADER: SCORE & VIES -->
+    <header class="flex justify-between items-center p-3 md:p-4 bg-slate-900 border-b border-slate-700 z-10 shrink-0">
+        <div>
+            <p class="text-xs text-slate-400 uppercase tracking-widest font-bold">Score</p>
+            <p id="score-display" class="text-3xl font-black text-amber-400">0</p>
+        </div>
+        <div class="text-right">
+            <p class="text-xs text-slate-400 uppercase tracking-widest font-bold mb-1">Vies</p>
+            <div id="lives-display" class="text-2xl flex gap-1 justify-end">
+                <span>❤️</span><span>❤️</span><span>❤️</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- BARRE DE TEMPS (LA PRESSION) -->
+    <div class="w-full h-3 md:h-4 bg-slate-800 shrink-0 relative z-10 border-b border-slate-700">
+        <div id="timer-bar" class="h-full bg-emerald-500 w-full shadow-[0_0_10px_rgba(16,185,129,0.8)]"></div>
+    </div>
+
+    <!-- ZONE DE JEU DYNAMIQUE -->
+    <main class="flex-1 flex flex-col items-center justify-center p-4 relative z-10 w-full max-w-lg mx-auto">
+        
+        <h2 id="instruction-text" class="text-3xl md:text-5xl font-black text-white uppercase tracking-widest text-center mb-6 drop-shadow-lg"></h2>
+
+        <div id="game-content" class="w-full flex flex-col items-center justify-center min-h-[200px]">
+            <!-- Rempli par le JS -->
+        </div>
+
+    </main>
+
+    <!-- BOUTONS D'ACTION MASSIFS -->
+    <div class="px-2 md:px-4 w-full max-w-lg mx-auto shrink-0 z-10 flex gap-2">
+        <button id="btn-left" class="flex-1 h-24 md:h-32 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 rounded-2xl font-black text-2xl md:text-4xl uppercase shadow-[0_6px_0_rgb(67,56,202)] active:shadow-none active:translate-y-1 transition-all">G</button>
+        <button id="btn-right" class="flex-1 h-24 md:h-32 bg-pink-600 hover:bg-pink-500 active:bg-pink-700 rounded-2xl font-black text-2xl md:text-4xl uppercase shadow-[0_6px_0_rgb(190,24,93)] active:shadow-none active:translate-y-1 transition-all">D</button>
+    </div>
+
+    <!-- ECRAN D'ACCUEIL / GAME OVER -->
+    <div id="menu-overlay" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center z-50 backdrop-blur-md p-6 text-center">
+        <h1 id="menu-title" class="text-5xl md:text-7xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-600 uppercase italic transform -skew-x-6">PokerWare</h1>
+        <p id="menu-subtitle" class="text-lg text-slate-300 mb-8 font-bold">Réfléchissez vite. Très vite.</p>
+        
+        <div id="stats-box" class="hidden bg-slate-800 p-4 rounded-xl border border-slate-700 mb-8 w-full max-w-xs mx-auto">
+            <p class="text-slate-400 text-sm uppercase">Score Final</p>
+            <p id="final-score" class="text-4xl font-black text-white">12</p>
+        </div>
+
+        <button id="btn-start" class="bg-emerald-500 text-slate-900 font-black text-3xl px-12 py-6 rounded-2xl shadow-[0_6px_0_rgb(5,150,105)] hover:translate-y-1 hover:shadow-[0_2px_0_rgb(5,150,105)] active:translate-y-2 active:shadow-none transition-all">▶ JOUER</button>
+    </div>
+
+    <script>
+        // --- MOTEUR AUDIO (Tone.js) ---
+        let synth;
+        function initAudio() {
+            if (!synth) synth = new Tone.PolySynth(Tone.Synth).toDestination();
+        }
+        function playSound(type) {
+            if (!synth) return;
+            try {
+                const now = Tone.now();
+                if (type === 'tick') synth.triggerAttackRelease("C6", "64n", now, 0.1);
+                if (type === 'win') synth.triggerAttackRelease(["C5", "E5", "G5"], "16n", now);
+                if (type === 'lose') { synth.triggerAttackRelease("C3", "8n", now); synth.triggerAttackRelease("G2", "4n", now+0.1); }
+                if (type === 'speedup') synth.triggerAttackRelease(["C5", "C6"], "8n", now);
+            } catch(e){}
+        }
+
+        // --- ETAT DU JEU ---
+        let score = 0;
+        let lives = 3;
+        let isPlaying = false;
+        let currentTimer = 0;
+        let maxTime = 4000;
+        let timerInterval;
+        let currentGame = null;
+
+        const timerBar = document.getElementById('timer-bar');
+        const flashOverlay = document.getElementById('flash-overlay');
+
+        // --- BIBLIOTHEQUE DES 6 MICRO-JEUX ---
+        const microGames = [
+            {
+                name: "PotOdds",
+                instruction: "AS-TU LA COTE ?",
+                setup: function() {
+                    const pot = Math.floor(Math.random() * 100) + 20;
+                    const bet = Math.floor(Math.random() * pot) + 10;
+                    const oddsNeeded = bet / (pot + bet + bet);
+                    
+                    const isWinning = Math.random() > 0.5;
+                    let heroEquity = isWinning ? oddsNeeded + (Math.random() * 0.2 + 0.05) : oddsNeeded - (Math.random() * 0.1 + 0.05);
+                    heroEquity = Math.max(0.01, Math.min(0.99, heroEquity));
+
+                    const html = `
+                        <div class="bg-slate-800 p-4 rounded-xl border-2 border-slate-600 w-full text-center shadow-lg">
+                            <p class="text-slate-400 text-sm font-bold uppercase">Pot Initial : <span class="text-white">${pot}</span></p>
+                            <p class="text-red-400 text-xl font-black mt-2 uppercase">Mise adverse : ${bet}</p>
+                            <div class="mt-4 p-3 bg-slate-900 rounded-lg border border-slate-700">
+                                <p class="text-xs text-slate-500 uppercase font-bold">Ton Équité</p>
+                                <p class="text-3xl text-blue-400 font-black">${(heroEquity * 100).toFixed(0)} %</p>
+                            </div>
+                        </div>
+                    `;
+                    return { html: html, btnLeft: "FOLD", btnRight: "CALL", correctAnswer: isWinning ? "btn-right" : "btn-left" };
+                }
+            },
+            {
+                name: "SPR",
+                instruction: "ÉVALUE LE SPR !",
+                setup: function() {
+                    const pot = Math.floor(Math.random() * 50) + 10;
+                    const isLow = Math.random() > 0.5;
+                    let spr = isLow ? (Math.random() * 2 + 0.5) : (Math.random() * 10 + 6);
+                    const stack = Math.floor(pot * spr);
+
+                    const html = `
+                        <div class="flex gap-4 w-full">
+                            <div class="flex-1 bg-slate-800 p-4 rounded-xl border-2 border-amber-500 flex flex-col items-center justify-center">
+                                <p class="text-slate-400 text-xs font-bold uppercase mb-1">Pot</p>
+                                <p class="text-4xl font-black text-white">${pot}</p>
+                            </div>
+                            <div class="flex-1 bg-slate-800 p-4 rounded-xl border-2 border-emerald-500 flex flex-col items-center justify-center">
+                                <p class="text-slate-400 text-xs font-bold uppercase mb-1">Stack</p>
+                                <p class="text-4xl font-black text-white">${stack}</p>
+                            </div>
+                        </div>
+                    `;
+                    return { html: html, btnLeft: "LOW (<3)", btnRight: "HIGH (>6)", correctAnswer: isLow ? "btn-left" : "btn-right" };
+                }
+            },
+            {
+                name: "FlushDraw",
+                instruction: "TIRAGE COULEUR ?",
+                setup: function() {
+                    const suits = ['spade', 'heart', 'diamond', 'club'];
+                    const symbols = {'spade': '♠', 'heart': '♥', 'diamond': '♦', 'club': '♣'};
+                    const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+                    
+                    const hasDraw = Math.random() > 0.5;
+                    let suit1 = suits[Math.floor(Math.random() * suits.length)];
+                    let suit2 = hasDraw ? suit1 : suits[(suits.indexOf(suit1) + 1) % 4];
+                    let suit3 = suits[(suits.indexOf(suit1) + 2) % 4];
+                    
+                    let board = [
+                        { rank: ranks[Math.floor(Math.random() * ranks.length)], suit: suit1 },
+                        { rank: ranks[Math.floor(Math.random() * ranks.length)], suit: suit2 },
+                        { rank: ranks[Math.floor(Math.random() * ranks.length)], suit: suit3 }
+                    ];
+                    board.sort(() => Math.random() - 0.5);
+
+                    const html = `
+                        <div class="flex gap-3 justify-center w-full bg-slate-800/50 p-6 rounded-2xl border border-slate-700">
+                            ${board.map(c => `<div class="card w-16 h-24 text-3xl ${c.suit} border-2 border-slate-200">${c.rank}${symbols[c.suit]}</div>`).join('')}
+                        </div>
+                    `;
+                    return { html: html, btnLeft: "NON", btnRight: "OUI", correctAnswer: hasDraw ? "btn-right" : "btn-left" };
+                }
+            },
+            {
+                name: "FlopTexture",
+                instruction: "WET OU DRY ?",
+                setup: function() {
+                    const suits = ['spade', 'heart', 'diamond', 'club'];
+                    const symbols = {'spade': '♠', 'heart': '♥', 'diamond': '♦', 'club': '♣'};
+                    const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+                    const rVals = {'A':14, 'K':13, 'Q':12, 'J':11, 'T':10, '9':9, '8':8, '7':7, '6':6, '5':5, '4':4, '3':3, '2':2};
+                    
+                    let deck = [];
+                    for(let r of ranks) for(let s of suits) deck.push({rank: r, suit: s, val: rVals[r]});
+                    deck.sort(() => Math.random() - 0.5);
+                    let flop = deck.slice(0, 3);
+                    
+                    let sCounts = {}; let hasFD = false;
+                    flop.forEach(c => { sCounts[c.suit] = (sCounts[c.suit]||0)+1; if(sCounts[c.suit]>=2) hasFD=true; });
+                    
+                    let vals = flop.map(c => c.val).sort((a,b)=>a-b);
+                    let isConn = (vals[2] - vals[0] <= 4) || (vals[2]===14 && vals[0]===2 && vals[1]<=5);
+                    let isWet = hasFD || isConn;
+
+                    const html = `
+                        <div class="flex gap-3 justify-center w-full bg-slate-800/50 p-6 rounded-2xl border border-slate-700 shadow-inner">
+                            ${flop.map(c => `<div class="card w-16 h-24 text-3xl ${c.suit} border-2 border-slate-200">${c.rank}${symbols[c.suit]}</div>`).join('')}
+                        </div>
+                    `;
+                    return { html: html, btnLeft: "DRY", btnRight: "WET", correctAnswer: isWet ? "btn-right" : "btn-left" };
+                }
+            },
+            {
+                name: "StackToBB",
+                instruction: "COMBIEN DE BB ?",
+                setup: function() {
+                    const blvl = [100, 200, 400, 500, 1000, 2000, 5000, 10000];
+                    const bb = blvl[Math.floor(Math.random() * blvl.length)];
+                    const isLow = Math.random() > 0.5;
+                    let sInBB = isLow ? (Math.random() * 10 + 5) : (Math.random() * 40 + 25);
+                    let stack = Math.floor(sInBB * bb);
+
+                    const html = `
+                        <div class="bg-slate-800 p-6 rounded-xl border-2 border-slate-600 w-full text-center shadow-lg">
+                            <p class="text-slate-400 text-sm font-bold uppercase mb-2">Blindes : <span class="text-white">${bb/2}/${bb}</span></p>
+                            <div class="p-4 bg-slate-900 rounded-lg border border-slate-700">
+                                <p class="text-xs text-slate-500 uppercase font-bold mb-1">Tapis (Jetons)</p>
+                                <p class="text-4xl text-amber-400 font-black">${stack.toLocaleString()}</p>
+                            </div>
+                        </div>
+                    `;
+                    return { html: html, btnLeft: "< 20 BB", btnRight: "> 20 BB", correctAnswer: isLow ? "btn-left" : "btn-right" };
+                }
+            },
+            {
+                name: "SizingCheck",
+                instruction: "QUEL SIZING ?",
+                setup: function() {
+                    const pots = [30, 60, 90, 120, 150, 240, 300];
+                    const pot = pots[Math.floor(Math.random() * pots.length)];
+                    const isOneThird = Math.random() > 0.5;
+                    const bet = isOneThird ? (pot / 3) : (pot / 2);
+
+                    const html = `
+                        <div class="flex gap-4 w-full">
+                            <div class="flex-1 bg-slate-800 p-4 rounded-xl border-2 border-slate-500 flex flex-col items-center justify-center">
+                                <p class="text-slate-400 text-xs font-bold uppercase mb-1">Pot</p>
+                                <p class="text-4xl font-black text-white">${pot}</p>
+                            </div>
+                            <div class="flex-1 bg-slate-800 p-4 rounded-xl border-2 border-red-500 flex flex-col items-center justify-center">
+                                <p class="text-slate-400 text-xs font-bold uppercase mb-1">Mise</p>
+                                <p class="text-4xl font-black text-red-400">${bet}</p>
+                            </div>
+                        </div>
+                    `;
+                    return { html: html, btnLeft: "1/3 POT", btnRight: "1/2 POT", correctAnswer: isOneThird ? "btn-left" : "btn-right" };
+                }
+            }
+        ];
+
+        // --- MOTEUR DE JEU ---
+
+        function updateUI() {
+            document.getElementById('score-display').textContent = score;
+            let livesHtml = "";
+            for(let i=0; i<3; i++) livesHtml += i < lives ? "❤️" : "🖤";
+            document.getElementById('lives-display').innerHTML = livesHtml;
+        }
+
+        function flashScreen(type) {
+            flashOverlay.className = `absolute inset-0 z-0 pointer-events-none flash-${type === 'win' ? 'green' : 'red'}`;
+            setTimeout(() => { flashOverlay.className = "absolute inset-0 z-0 pointer-events-none"; }, 300);
+        }
+
+        function showResultAndNext(isWin) {
+            isPlaying = false;
+            clearInterval(timerInterval);
+            
+            if (isWin) {
+                score++;
+                playSound('win');
+                flashScreen('win');
+                document.getElementById('instruction-text').textContent = "BIEN !";
+                document.getElementById('instruction-text').className = "text-5xl font-black text-emerald-400 uppercase tracking-widest text-center mb-6 drop-shadow-[0_0_15px_rgba(16,185,129,0.8)]";
+                
+                if (score > 0 && score % 5 === 0) {
+                    maxTime = Math.max(1500, maxTime * 0.85);
+                    playSound('speedup');
+                    document.getElementById('instruction-text').textContent = "PLUS VITE !";
+                    document.getElementById('instruction-text').className = "text-5xl font-black text-yellow-400 uppercase tracking-widest text-center mb-6 drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]";
+                }
+            } else {
+                lives--;
+                playSound('lose');
+                flashScreen('lose');
+                document.body.classList.add('shake');
+                setTimeout(() => document.body.classList.remove('shake'), 300);
+                document.getElementById('instruction-text').textContent = "FAUX !";
+                document.getElementById('instruction-text').className = "text-5xl font-black text-red-500 uppercase tracking-widest text-center mb-6 drop-shadow-[0_0_15px_rgba(239,68,68,0.8)]";
+            }
+
+            updateUI();
+
+            if (lives <= 0) {
+                setTimeout(endGame, 1000);
+            } else {
+                setTimeout(nextMiniGame, 1000);
+            }
+        }
+
+        function handleInput(btnId) {
+            if (!isPlaying || !currentGame) return;
+            if (btnId === currentGame.correctAnswer) showResultAndNext(true);
+            else showResultAndNext(false);
+        }
+
+        function nextMiniGame() {
+            const gameDef = microGames[Math.floor(Math.random() * microGames.length)];
+            currentGame = gameDef.setup();
+
+            document.getElementById('instruction-text').className = "text-3xl md:text-5xl font-black text-white uppercase tracking-widest text-center mb-6 drop-shadow-lg";
+            document.getElementById('instruction-text').textContent = gameDef.instruction;
+            document.getElementById('game-content').innerHTML = currentGame.html;
+            
+            document.getElementById('btn-left').textContent = currentGame.btnLeft;
+            document.getElementById('btn-right').textContent = currentGame.btnRight;
+
+            currentTimer = maxTime;
+            isPlaying = true;
+            timerBar.className = "h-full bg-emerald-500 w-full shadow-[0_0_10px_rgba(16,185,129,0.8)]";
+            
+            clearInterval(timerInterval);
+            let lastTime = performance.now();
+            
+            timerInterval = setInterval(() => {
+                let now = performance.now();
+                currentTimer -= (now - lastTime);
+                lastTime = now;
+
+                if (currentTimer <= 0) {
+                    currentTimer = 0;
+                    showResultAndNext(false);
+                } else {
+                    const pct = (currentTimer / maxTime) * 100;
+                    timerBar.style.width = pct + "%";
+                    if (pct < 30) timerBar.className = "h-full bg-red-500 w-full shadow-[0_0_10px_rgba(239,68,68,0.8)] transition-none";
+                    else if (pct < 60) timerBar.className = "h-full bg-amber-400 w-full shadow-[0_0_10px_rgba(251,191,36,0.8)] transition-none";
+                }
+            }, 16);
+        }
+
+        function startGame() {
+            Tone.start();
+            initAudio();
+            document.getElementById('menu-overlay').classList.add('hidden');
+            score = 0;
+            lives = 3;
+            maxTime = 4000;
+            updateUI();
+            nextMiniGame();
+        }
+
+        function endGame() {
+            document.getElementById('menu-overlay').classList.remove('hidden');
+            document.getElementById('menu-title').textContent = "GAME OVER";
+            document.getElementById('menu-title').className = "text-5xl md:text-7xl font-black mb-2 text-red-500 uppercase tracking-widest drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]";
+            document.getElementById('menu-subtitle').textContent = "Ton cerveau a fondu.";
+            document.getElementById('stats-box').classList.remove('hidden');
+            document.getElementById('final-score').textContent = score;
+            document.getElementById('btn-start').textContent = "REJOUER";
+        }
+
+        document.getElementById('btn-start').addEventListener('click', startGame);
+        
+        ['btn-left', 'btn-right'].forEach(id => {
+            const btn = document.getElementById(id);
+            btn.addEventListener('mousedown', (e) => { e.preventDefault(); handleInput(id); });
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(id); }, {passive: false});
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (!isPlaying) return;
+            if (e.key === 'ArrowLeft') handleInput('btn-left');
+            if (e.key === 'ArrowRight') handleInput('btn-right');
+        });
+
+    </script>
+</body>
+</html>
